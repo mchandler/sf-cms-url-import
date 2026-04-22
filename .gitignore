@@ -1,0 +1,9 @@
+node_modules/
+*.csv
+checkpoint-*.json
+errors-*.csv
+.DS_Store
+npm-debug.log*
+
+# Local tooling and editor directories at repo root
+/.*/

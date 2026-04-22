@@ -1,0 +1,16 @@
+{
+  "name": "salesforce-cms-url-import",
+  "version": "0.1.0",
+  "description": "Imports product image URLs into Salesforce CMS and links them to Product2 via ProductMedia using the Connect REST API.",
+  "main": "import-images.js",
+  "scripts": {
+    "start": "node import-images.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "csv-stringify": "^6.5.1"
+  }
+}
