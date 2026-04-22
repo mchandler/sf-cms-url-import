@@ -28,7 +28,9 @@ function prompt(question) {
 async function resolveCheckpoint({ cfg, freshUniqueImages }) {
   const existing = checkpointLib.load(cfg.org);
   if (!existing) {
-    return checkpointLib.emptyState(cfg.org, cfg.csvPath, cfg.workspaceId);
+    const state = checkpointLib.emptyState(cfg.org, cfg.csvPath, cfg.workspaceId);
+    state.uniqueImages = freshUniqueImages;
+    return state;
   }
 
   const warnings = [];
