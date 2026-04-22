@@ -26,12 +26,14 @@ function prompt(question) {
 }
 
 async function resolveCheckpoint({ cfg, freshUniqueImages }) {
+  const makeFresh = () => {
+    const s = checkpointLib.emptyState(cfg.org, cfg.csvPath, cfg.workspaceId);
+    s.uniqueImages = freshUniqueImages;
+    return s;
+  };
+
   const existing = checkpointLib.load(cfg.org);
-  if (!existing) {
-    const state = checkpointLib.emptyState(cfg.org, cfg.csvPath, cfg.workspaceId);
-    state.uniqueImages = freshUniqueImages;
-    return state;
-  }
+  if (!existing) return makeFresh();
 
   const warnings = [];
   if (existing.csvPath && existing.csvPath !== cfg.csvPath) {
@@ -56,7 +58,7 @@ async function resolveCheckpoint({ cfg, freshUniqueImages }) {
   if (answer === 'n' || answer === 'no') {
     const backupPath = checkpointLib.backup(cfg.org);
     console.log(`Backed up old checkpoint to ${backupPath}`);
-    return checkpointLib.emptyState(cfg.org, cfg.csvPath, cfg.workspaceId);
+    return makeFresh();
   }
 
   const existingByUrl = new Map();
