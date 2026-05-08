@@ -7,7 +7,11 @@ const { resolveConfig } = require('./lib/args');
 const { createSession } = require('./lib/auth');
 const { createClient } = require('./lib/http');
 const { loadCsv } = require('./lib/csv-load');
-const { fetchElectronicMediaGroups, fetchProductIdsBySku } = require('./lib/lookups');
+const {
+  fetchElectronicMediaGroups,
+  fetchProductIdsBySku,
+  fetchCategoryIdsByExternalId,
+} = require('./lib/lookups');
 const { createErrorLog } = require('./lib/error-log');
 const { formatDuration } = require('./lib/progress');
 const checkpointLib = require('./lib/checkpoint');
@@ -27,12 +31,12 @@ function prompt(question) {
 
 async function resolveCheckpoint({ cfg, freshUniqueImages }) {
   const makeFresh = () => {
-    const s = checkpointLib.emptyState(cfg.org, cfg.csvPath, cfg.workspaceId);
+    const s = checkpointLib.emptyState(cfg.org, cfg.csvPath, cfg.workspaceId, cfg.kind);
     s.uniqueImages = freshUniqueImages;
     return s;
   };
 
-  const existing = checkpointLib.load(cfg.org);
+  const existing = checkpointLib.load(cfg.org, cfg.kind);
   if (!existing) return makeFresh();
 
   const warnings = [];
@@ -42,8 +46,11 @@ async function resolveCheckpoint({ cfg, freshUniqueImages }) {
   if (existing.workspaceId && existing.workspaceId !== cfg.workspaceId) {
     warnings.push(`  Workspace ID differs: checkpoint=${existing.workspaceId} vs current=${cfg.workspaceId}`);
   }
+  if (existing.kind && existing.kind !== cfg.kind) {
+    warnings.push(`  Kind differs: checkpoint=${existing.kind} vs current=${cfg.kind}`);
+  }
 
-  console.log(`Found checkpoint: checkpoint-${cfg.org}.json`);
+  console.log(`Found checkpoint: ${checkpointLib.checkpointPath(cfg.org, cfg.kind)}`);
   console.log(`  Timestamp: ${existing.timestamp}`);
   for (const p of [1, 2, 3]) {
     const ph = existing.phases[p] || { status: 'pending', succeeded: 0, failed: 0 };
@@ -56,7 +63,7 @@ async function resolveCheckpoint({ cfg, freshUniqueImages }) {
 
   const answer = await prompt('Resume from this checkpoint? [Y/n]: ');
   if (answer === 'n' || answer === 'no') {
-    const backupPath = checkpointLib.backup(cfg.org);
+    const backupPath = checkpointLib.backup(cfg.org, cfg.kind);
     console.log(`Backed up old checkpoint to ${backupPath}`);
     return makeFresh();
   }
@@ -74,16 +81,17 @@ async function resolveCheckpoint({ cfg, freshUniqueImages }) {
 
   return {
     ...existing,
+    kind: cfg.kind,
     csvPath: cfg.csvPath,
     workspaceId: cfg.workspaceId,
     uniqueImages: mergedUniqueImages,
   };
 }
 
-function uniqueSkusFromRows(rows) {
+function uniqueParentKeysFromRows(rows) {
   const set = new Set();
   for (const r of rows) {
-    if (!r.skipReason && r.sku) set.add(r.sku);
+    if (!r.skipReason && r.parentKey) set.add(r.parentKey);
   }
   return Array.from(set);
 }
@@ -115,6 +123,7 @@ async function main() {
   console.log(`Org: ${cfg.org}`);
   console.log(`Workspace: ${cfg.workspaceId}`);
   console.log(`CSV: ${cfg.csvPath}`);
+  console.log(`Kind: ${cfg.kind}`);
   console.log(`Pace: ${cfg.paceMs}ms | Batch size: ${cfg.batchSize} | Phase: ${cfg.phase ?? 'all'} | Force: ${cfg.force}`);
   console.log('');
 
@@ -126,7 +135,7 @@ async function main() {
   const client = createClient(session);
 
   console.log('Loading CSV...');
-  const { uniqueImages, uniqueByUrl, rows, stats } = await loadCsv(cfg.csvPath);
+  const { uniqueImages, uniqueByUrl, rows, stats } = await loadCsv(cfg.csvPath, { kind: cfg.kind });
   console.log(
     `  ${stats.totalRows} rows | ${stats.uniqueUrls} unique URLs | ${stats.skipped} skipped`
   );
@@ -135,7 +144,7 @@ async function main() {
 
   for (const entry of state.uniqueImages) uniqueByUrl.set(entry.url, entry);
 
-  const errorLog = createErrorLog(cfg.org);
+  const errorLog = createErrorLog(cfg.org, cfg.kind);
 
   const runAll = cfg.phase == null;
   const shouldRun = (p) => cfg.phase == null || cfg.phase === p;
@@ -161,14 +170,32 @@ async function main() {
       const mediaGroupIdByName = await fetchElectronicMediaGroups(client);
       console.log(`  Found ${mediaGroupIdByName.size} media groups: ${Array.from(mediaGroupIdByName.keys()).join(', ')}`);
 
-      console.log('Loading Product2 IDs by SKU...');
-      const skus = uniqueSkusFromRows(rows);
-      const productIdBySku = await fetchProductIdsBySku(client, skus, cfg.paceMs);
-      console.log(`  Matched ${productIdBySku.size} / ${skus.length} SKUs`);
+      const parentKeys = uniqueParentKeysFromRows(rows);
+      let parentIdByKey;
+      let sObjectType;
+      let parentFkName;
+      let parentKeyLabel;
+
+      if (cfg.kind === 'category') {
+        console.log('Loading ProductCategory IDs by External_Id__c...');
+        parentIdByKey = await fetchCategoryIdsByExternalId(client, parentKeys, cfg.paceMs);
+        console.log(`  Matched ${parentIdByKey.size} / ${parentKeys.length} categoryCodes`);
+        sObjectType = 'ProductCategoryMedia';
+        parentFkName = 'ProductCategoryId';
+        parentKeyLabel = 'categoryCode';
+      } else {
+        console.log('Loading Product2 IDs by SKU...');
+        parentIdByKey = await fetchProductIdsBySku(client, parentKeys, cfg.paceMs);
+        console.log(`  Matched ${parentIdByKey.size} / ${parentKeys.length} SKUs`);
+        sObjectType = 'ProductMedia';
+        parentFkName = 'ProductId';
+        parentKeyLabel = 'SKU';
+      }
 
       await runPhase3({
         client, state, rows, uniqueByUrl,
-        productIdBySku, mediaGroupIdByName,
+        parentIdByKey, mediaGroupIdByName,
+        sObjectType, parentFkName, parentKeyLabel,
         paceMs: cfg.paceMs, errorLog, force: cfg.force,
       });
     }
