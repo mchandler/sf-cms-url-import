@@ -99,9 +99,10 @@ function uniqueParentKeysFromRows(rows) {
 function printFinalSummary(state, errorLog, elapsedMs) {
   console.log('');
   console.log('=== RESULTS ===');
+  const phase3Label = state.kind === 'category' ? 'ProductCategoryMedia' : 'ProductMedia';
   for (const p of [1, 2, 3]) {
     const ph = state.phases[p];
-    const label = { 1: 'CMS Creation', 2: 'Publish', 3: 'ProductMedia' }[p];
+    const label = { 1: 'CMS Creation', 2: 'Publish', 3: phase3Label }[p];
     console.log(
       `Phase ${p} (${label}): ${ph.succeeded} succeeded | ${ph.failed} failed | status=${ph.status}`
     );
